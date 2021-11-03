@@ -8,7 +8,7 @@ namespace System.Net.Http.Headers
 {
     internal class TransferCodingHeaderParser : BaseHeaderParser
     {
-        private Func<TransferCodingHeaderValue> _transferCodingCreator;
+        private Func<string, TransferCodingHeaderValue> _transferCodingCreator;
 
         internal static readonly TransferCodingHeaderParser SingleValueParser =
             new TransferCodingHeaderParser(false, CreateTransferCoding);
@@ -20,7 +20,7 @@ namespace System.Net.Http.Headers
             new TransferCodingHeaderParser(true, CreateTransferCodingWithQuality);
 
         private TransferCodingHeaderParser(bool supportsMultipleValues,
-            Func<TransferCodingHeaderValue> transferCodingCreator)
+            Func<string, TransferCodingHeaderValue> transferCodingCreator)
             : base(supportsMultipleValues)
         {
             Debug.Assert(transferCodingCreator != null);
@@ -28,25 +28,14 @@ namespace System.Net.Http.Headers
             _transferCodingCreator = transferCodingCreator;
         }
 
-        protected override int GetParsedValueLength(string value, int startIndex, object storeValue,
-            out object parsedValue)
+        private static TransferCodingHeaderValue CreateTransferCoding(string value)
         {
-            TransferCodingHeaderValue temp = null;
-            int resultLength = TransferCodingHeaderValue.GetTransferCodingLength(value, startIndex,
-                _transferCodingCreator, out temp);
-
-            parsedValue = temp;
-            return resultLength;
+            return new TransferCodingHeaderValue(value);
         }
 
-        private static TransferCodingHeaderValue CreateTransferCoding()
+        private static TransferCodingHeaderValue CreateTransferCodingWithQuality(string value)
         {
-            return new TransferCodingHeaderValue();
-        }
-
-        private static TransferCodingHeaderValue CreateTransferCodingWithQuality()
-        {
-            return new TransferCodingWithQualityHeaderValue();
+            return new TransferCodingWithQualityHeaderValue(value);
         }
     }
 }

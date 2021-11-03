@@ -150,7 +150,7 @@ namespace System.Net.Http.Functional.Tests
         [MemberData(nameof(ThreeBools))]
         public async Task GetAsync_CancelDuringResponseBodyReceived_Unbuffered_TaskCanceledQuickly(bool chunkedTransfer, bool connectionClose, bool readOrCopyToAsync)
         {
-            if (IsNetfxHandler || IsCurlHandler)
+            if (IsCurlHandler)
             {
                 // doesn't cancel
                 return;
@@ -202,16 +202,11 @@ namespace System.Net.Http.Functional.Tests
 
         [Theory]
         [InlineData(CancellationMode.CancelPendingRequests, false)]
-        [InlineData(CancellationMode.DisposeHttpClient, true)]
-        [InlineData(CancellationMode.CancelPendingRequests, false)]
+        [InlineData(CancellationMode.DisposeHttpClient, false)]
+        [InlineData(CancellationMode.CancelPendingRequests, true)]
         [InlineData(CancellationMode.DisposeHttpClient, true)]
         public async Task GetAsync_CancelPendingRequests_DoesntCancelReadAsyncOnResponseStream(CancellationMode mode, bool copyToAsync)
         {
-            if (IsNetfxHandler)
-            {
-                // throws ObjectDisposedException as part of Stream.CopyToAsync/ReadAsync
-                return;
-            }
             if (IsCurlHandler)
             {
                 // Issue #27065
@@ -297,14 +292,8 @@ namespace System.Net.Http.Functional.Tests
                 // while parsing headers.
                 return;
             }
-            if (IsNetfxHandler)
-            {
-                // Throws HttpRequestException wrapping a WebException for the canceled request
-                // instead of throwing an OperationCanceledException or a canceled WebException directly.
-                return;
-            }
 
-            using (HttpClientHandler handler = CreateHttpClientHandler())
+            using (StandardSocketsHttpHandler handler = CreateSocketsHttpHandler())
             using (HttpClient client = new HttpClient(handler))
             {
                 handler.MaxConnectionsPerServer = 1;
@@ -355,19 +344,9 @@ namespace System.Net.Http.Functional.Tests
 
             Assert.NotNull(error);
 
-            if (IsNetfxHandler)
-            {
-                Assert.True(
-                    error is WebException we && we.Status == WebExceptionStatus.RequestCanceled ||
-                    error is OperationCanceledException,
-                    "Expected cancellation exception, got:" + Environment.NewLine + error);
-            }
-            else
-            {
-                Assert.True(
-                    error is OperationCanceledException,
-                    "Expected cancellation exception, got:" + Environment.NewLine + error);
-            }
+            Assert.True(
+                error is OperationCanceledException,
+                "Expected cancellation exception, got:" + Environment.NewLine + error);
 
             Assert.True(stopwatch.Elapsed < new TimeSpan(0, 0, 30), $"Elapsed time {stopwatch.Elapsed} should be less than 30 seconds, was {stopwatch.Elapsed.TotalSeconds}");
         }
@@ -433,7 +412,7 @@ namespace System.Net.Http.Functional.Tests
                 var buffer = new byte[1] { 42 };
                 for (int i = 0; i < _length; i++)
                 {
-                    await stream.WriteAsync(buffer);
+                    await stream.WriteAsync(buffer, 0, buffer.Length);
                     await stream.FlushAsync();
                     await Task.Delay(1);
                 }

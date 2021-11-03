@@ -14,12 +14,13 @@ using System.Threading.Tasks;
 
 namespace System.Net.Http
 {
+    internal delegate void ConfigureSocket(Socket socket);
+
     internal static class ConnectHelper
     {
         /// <summary>Pool of event args to use to establish connections.</summary>
-        private static readonly ConcurrentQueue<ConnectEventArgs>.Segment s_connectEventArgs =
-            new ConcurrentQueue<ConnectEventArgs>.Segment(
-                ConcurrentQueue<ConnectEventArgs>.Segment.RoundUpToPowerOf2(Math.Max(2, Environment.ProcessorCount)));
+        private static readonly ConcurrentQueue<ConnectEventArgs> s_connectEventArgs =
+            new ConcurrentQueue<ConnectEventArgs>();
 
         /// <summary>
         /// Helper type used by HttpClientHandler when wrapping SocketsHttpHandler to map its
@@ -38,8 +39,20 @@ namespace System.Net.Http
             }
         }
 
-        public static async ValueTask<(Socket, Stream)> ConnectAsync(string host, int port, CancellationToken cancellationToken)
+        public static async Task<(Socket, Stream)> ConnectAsync(string host, int port, Func<SocketsHttpConnectionContext, CancellationToken, Task<Stream>> connectCallback, CancellationToken cancellationToken)
         {
+            DnsEndPoint remoteEndPoint = new DnsEndPoint(host, port);
+            if (connectCallback != null)
+            {
+                Stream stream = await connectCallback(new SocketsHttpConnectionContext(remoteEndPoint), cancellationToken);
+                Socket socket = null;
+                if (stream is NetworkStream)
+                {
+                    socket = typeof(NetworkStream).GetProperty("Socket", Reflection.BindingFlags.Instance | Reflection.BindingFlags.NonPublic).GetValue(stream) as Socket;
+                }
+                return (socket, stream);
+            }
+
             // Rather than creating a new Socket and calling ConnectAsync on it, we use the static
             // Socket.ConnectAsync with a SocketAsyncEventArgs, as we can then use Socket.CancelConnectAsync
             // to cancel it if needed. Rent or allocate one.
@@ -54,7 +67,7 @@ namespace System.Net.Http
                 saea.Initialize(cancellationToken);
 
                 // Configure which server to which to connect.
-                saea.RemoteEndPoint = new DnsEndPoint(host, port);
+                saea.RemoteEndPoint = remoteEndPoint;
 
                 // Initiate the connection.
                 if (Socket.ConnectAsync(SocketType.Stream, ProtocolType.Tcp, saea))
@@ -89,7 +102,11 @@ namespace System.Net.Http
             {
                 // Pool the event args, or if the pool is full, dispose of it.
                 saea.Clear();
-                if (!s_connectEventArgs.TryEnqueue(saea))
+                if (s_connectEventArgs.Count <= Math.Max(2, Environment.ProcessorCount))
+                {
+                    s_connectEventArgs.Enqueue(saea);
+                }
+                else
                 {
                     saea.Dispose();
                 }
@@ -136,7 +153,7 @@ namespace System.Net.Http
             }
         }
 
-        public static ValueTask<SslStream> EstablishSslConnectionAsync(SslClientAuthenticationOptions sslOptions, HttpRequestMessage request, Stream stream, CancellationToken cancellationToken)
+        public static Task<SslStream> EstablishSslConnectionAsync(SslClientAuthenticationOptions sslOptions, HttpRequestMessage request, Stream stream, CancellationToken cancellationToken)
         {
             // If there's a cert validation callback, and if it came from HttpClientHandler,
             // wrap the original delegate in order to change the sender to be the request message (expected by HttpClientHandler's delegate).
@@ -154,9 +171,9 @@ namespace System.Net.Http
             return EstablishSslConnectionAsyncCore(stream, sslOptions, cancellationToken);
         }
 
-        private static async ValueTask<SslStream> EstablishSslConnectionAsyncCore(Stream stream, SslClientAuthenticationOptions sslOptions, CancellationToken cancellationToken)
+        private static async Task<SslStream> EstablishSslConnectionAsyncCore(Stream stream, SslClientAuthenticationOptions sslOptions, CancellationToken cancellationToken)
         {
-            SslStream sslStream = new SslStream(stream);
+            SslStream sslStream = new SslStream(stream, false, sslOptions.RemoteCertificateValidationCallback, sslOptions.LocalCertificateSelectionCallback, sslOptions.EncryptionPolicy);
 
             // TODO #25206 and #24430: Register/IsCancellationRequested should be removable once SslStream auth and sockets respect cancellation.
             CancellationTokenRegistration ctr = cancellationToken.Register(s => ((Stream)s).Dispose(), stream);

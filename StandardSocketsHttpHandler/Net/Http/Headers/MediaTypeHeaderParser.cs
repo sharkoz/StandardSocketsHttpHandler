@@ -9,7 +9,7 @@ namespace System.Net.Http.Headers
     internal class MediaTypeHeaderParser : BaseHeaderParser
     {
         private bool _supportsMultipleValues;
-        private Func<MediaTypeHeaderValue> _mediaTypeCreator;
+        private Func<string, MediaTypeHeaderValue> _mediaTypeCreator;
 
         internal static readonly MediaTypeHeaderParser SingleValueParser = new MediaTypeHeaderParser(false,
             CreateMediaType);
@@ -18,7 +18,7 @@ namespace System.Net.Http.Headers
         internal static readonly MediaTypeHeaderParser MultipleValuesParser = new MediaTypeHeaderParser(true,
             CreateMediaTypeWithQuality);
 
-        private MediaTypeHeaderParser(bool supportsMultipleValues, Func<MediaTypeHeaderValue> mediaTypeCreator)
+        private MediaTypeHeaderParser(bool supportsMultipleValues, Func<string, MediaTypeHeaderValue> mediaTypeCreator)
             : base(supportsMultipleValues)
         {
             Debug.Assert(mediaTypeCreator != null);
@@ -27,24 +27,14 @@ namespace System.Net.Http.Headers
             _mediaTypeCreator = mediaTypeCreator;
         }
 
-        protected override int GetParsedValueLength(string value, int startIndex, object storeValue,
-            out object parsedValue)
+        private static MediaTypeHeaderValue CreateMediaType(string mediaType)
         {
-            MediaTypeHeaderValue temp = null;
-            int resultLength = MediaTypeHeaderValue.GetMediaTypeLength(value, startIndex, _mediaTypeCreator, out temp);
-
-            parsedValue = temp;
-            return resultLength;
+            return new MediaTypeHeaderValue(mediaType);
         }
 
-        private static MediaTypeHeaderValue CreateMediaType()
+        private static MediaTypeHeaderValue CreateMediaTypeWithQuality(string mediaType)
         {
-            return new MediaTypeHeaderValue();
-        }
-
-        private static MediaTypeHeaderValue CreateMediaTypeWithQuality()
-        {
-            return new MediaTypeWithQualityHeaderValue();
+            return new MediaTypeWithQualityHeaderValue(mediaType);
         }
     }
 }

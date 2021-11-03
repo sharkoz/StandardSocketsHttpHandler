@@ -16,14 +16,6 @@ namespace System.Net.Http.Functional.Tests
     {
         private static bool ClientSupportsDHECipherSuites => (!PlatformDetection.IsWindows || PlatformDetection.IsWindows10Version1607OrGreater);
 
-        [Fact]
-        public void SingletonReturnsTrue()
-        {
-            Assert.NotNull(HttpClientHandler.DangerousAcceptAnyServerCertificateValidator);
-            Assert.Same(HttpClientHandler.DangerousAcceptAnyServerCertificateValidator, HttpClientHandler.DangerousAcceptAnyServerCertificateValidator);
-            Assert.True(HttpClientHandler.DangerousAcceptAnyServerCertificateValidator(null, null, null, SslPolicyErrors.None));
-        }
-
         [Theory]
         [InlineData(SslProtocols.Tls, false)] // try various protocols to ensure we correctly set versions even when accepting all certs
         [InlineData(SslProtocols.Tls, true)]
@@ -35,10 +27,10 @@ namespace System.Net.Http.Functional.Tests
         [InlineData(SslProtocols.None, true)]
         public async Task SetDelegate_ConnectionSucceeds(SslProtocols acceptedProtocol, bool requestOnlyThisProtocol)
         {
-            using (HttpClientHandler handler = CreateHttpClientHandler())
+            using (StandardSocketsHttpHandler handler = CreateSocketsHttpHandler())
             using (var client = new HttpClient(handler))
             {
-                handler.ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator;
+                handler.SslOptions.RemoteCertificateValidationCallback = SecurityHelper.AllowAllCertificates;
 
                 // Refer issue: #22089
                 // When the server uses SslProtocols.Tls, on MacOS, SecureTransport ends up picking a cipher suite
@@ -46,7 +38,7 @@ namespace System.Net.Http.Functional.Tests
                 // wrong cipher is used for TLs1.0.
                 if (requestOnlyThisProtocol || (PlatformDetection.IsMacOsHighSierraOrHigher && acceptedProtocol == SslProtocols.Tls))
                 {
-                    handler.SslProtocols = acceptedProtocol;
+                    handler.SslOptions.EnabledSslProtocols = acceptedProtocol;
                 }
 
                 var options = new LoopbackServer.Options { UseSsl = true, SslProtocols = acceptedProtocol };
@@ -71,10 +63,10 @@ namespace System.Net.Http.Functional.Tests
         [MemberData(nameof(InvalidCertificateServers))]
         public async Task InvalidCertificateServers_CertificateValidationDisabled_Succeeds(string url)
         {
-            using (HttpClientHandler handler = CreateHttpClientHandler())
+            using (StandardSocketsHttpHandler handler = CreateSocketsHttpHandler())
             using (var client = new HttpClient(handler))
             {
-                handler.ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator;
+                handler.SslOptions.RemoteCertificateValidationCallback = SecurityHelper.AllowAllCertificates;
                 (await client.GetAsync(url)).Dispose();
             }
         }

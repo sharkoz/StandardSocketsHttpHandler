@@ -16,15 +16,16 @@ namespace System.Net.Http.Functional.Tests
     using Configuration = System.Net.Test.Common.Configuration;
 
     [SkipOnTargetFramework(TargetFrameworkMonikers.Uap, "SslProtocols not supported on UAP")]
-    [SkipOnTargetFramework(TargetFrameworkMonikers.NetFramework, "dotnet/corefx #16805")]
     public abstract partial class HttpClientHandler_SslProtocols_Test : HttpClientTestBase
     {
+        private static bool IsWindows10Version1607OrGreater => PlatformDetection.IsWindows10Version1607OrGreater;
+
         [Fact]
         public void DefaultProtocols_MatchesExpected()
         {
-            using (HttpClientHandler handler = CreateHttpClientHandler())
+            using (StandardSocketsHttpHandler handler = CreateSocketsHttpHandler())
             {
-                Assert.Equal(SslProtocols.None, handler.SslProtocols);
+                Assert.Equal(SslProtocols.None, handler.SslOptions.EnabledSslProtocols);
             }
         }
 
@@ -37,44 +38,43 @@ namespace System.Net.Http.Functional.Tests
         [InlineData(SslProtocols.Tls11 | SslProtocols.Tls12)]
         [InlineData(SslProtocols.Tls | SslProtocols.Tls12)]
         [InlineData(SslProtocols.Tls | SslProtocols.Tls11 | SslProtocols.Tls12)]
-#if !netstandard
         [InlineData(Tls13Protocol)]
         [InlineData(SslProtocols.Tls11 | Tls13Protocol)]
         [InlineData(SslProtocols.Tls12 | Tls13Protocol)]
         [InlineData(SslProtocols.Tls | Tls13Protocol)]
         [InlineData(SslProtocols.Tls | SslProtocols.Tls11 | SslProtocols.Tls12 | Tls13Protocol)]
-#endif
         public void SetGetProtocols_Roundtrips(SslProtocols protocols)
         {
-            using (HttpClientHandler handler = CreateHttpClientHandler())
+            using (StandardSocketsHttpHandler handler = CreateSocketsHttpHandler())
             {
-                handler.SslProtocols = protocols;
-                Assert.Equal(protocols, handler.SslProtocols);
+                handler.SslOptions.EnabledSslProtocols = protocols;
+                Assert.Equal(protocols, handler.SslOptions.EnabledSslProtocols);
             }
         }
 
-        [OuterLoop] // TODO: Issue #11345
-        [Fact]
-        public async Task SetProtocols_AfterRequest_ThrowsException()
-        {
-            if (!BackendSupportsSslConfiguration)
-            {
-                return;
-            }
-
-            using (HttpClientHandler handler = CreateHttpClientHandler())
-            using (var client = new HttpClient(handler))
-            {
-                handler.ServerCertificateCustomValidationCallback = TestHelper.AllowAllCertificates;
-                await LoopbackServer.CreateServerAsync(async (server, url) =>
-                {
-                    await TestHelper.WhenAllCompletedOrAnyFailed(
-                        server.AcceptConnectionSendResponseAndCloseAsync(),
-                        client.GetAsync(url));
-                });
-                Assert.Throws<InvalidOperationException>(() => handler.SslProtocols = SslProtocols.Tls12);
-            }
-        }
+        // It is HttpClientHandler that wraps SocketsHttpHandler that throws this exception 
+        //[OuterLoop] // TODO: Issue #11345
+        //[Fact]
+        //public async Task SetProtocols_AfterRequest_ThrowsException()
+        //{
+        //    if (!BackendSupportsSslConfiguration)
+        //    {
+        //        return;
+        //    }
+        //
+        //    using (StandardSocketsHttpHandler handler = CreateSocketsHttpHandler())
+        //    using (var client = new HttpClient(handler))
+        //    {
+        //        handler.SslOptions.RemoteCertificateValidationCallback = SecurityHelper.AllowAllCertificates;
+        //        await LoopbackServer.CreateServerAsync(async (server, url) =>
+        //        {
+        //            await TestHelper.WhenAllCompletedOrAnyFailed(
+        //                server.AcceptConnectionSendResponseAndCloseAsync(),
+        //                client.GetAsync(url));
+        //        });
+        //        Assert.Throws<InvalidOperationException>(() => handler.SslOptions.EnabledSslProtocols = SslProtocols.Tls12);
+        //    }
+        //}
 
 
         public static IEnumerable<object[]> GetAsync_AllowedSSLVersion_Succeeds_MemberData()
@@ -100,14 +100,12 @@ namespace System.Net.Http.Functional.Tests
                 yield return new object[] { SslProtocols.Ssl2, true };
             }
 #pragma warning restore 0618
-#if !netstandard
             // These protocols are new, and might not be enabled everywhere yet
             if (PlatformDetection.IsUbuntu1810OrHigher)
             {
                 yield return new object[] { Tls13Protocol, false };
                 yield return new object[] { Tls13Protocol, true };
             }
-#endif
         }
 
         [OuterLoop] // TODO: Issue #11345
@@ -128,14 +126,14 @@ namespace System.Net.Http.Functional.Tests
             }
 #pragma warning restore 0618
 
-            using (HttpClientHandler handler = CreateHttpClientHandler())
+            using (StandardSocketsHttpHandler handler = CreateSocketsHttpHandler())
             using (var client = new HttpClient(handler))
             {
-                handler.ServerCertificateCustomValidationCallback = TestHelper.AllowAllCertificates;
+                handler.SslOptions.RemoteCertificateValidationCallback = SecurityHelper.AllowAllCertificates;
 
                 if (requestOnlyThisProtocol)
                 {
-                    handler.SslProtocols = acceptedProtocol;
+                    handler.SslOptions.EnabledSslProtocols = acceptedProtocol;
                 }
                 var options = new LoopbackServer.Options { UseSsl = true, SslProtocols = acceptedProtocol };
                 await LoopbackServer.CreateServerAsync(async (server, url) =>
@@ -176,9 +174,9 @@ namespace System.Net.Http.Functional.Tests
                 return;
             }
 
-            using (HttpClientHandler handler = CreateHttpClientHandler())
+            using (StandardSocketsHttpHandler handler = CreateSocketsHttpHandler())
             {
-                handler.SslProtocols = sslProtocols;
+                handler.SslOptions.EnabledSslProtocols = sslProtocols;
                 using (var client = new HttpClient(handler))
                 {
                     (await RemoteServerQuery.Run(() => client.GetAsync(url), remoteServerExceptionWrapper, url)).Dispose();
@@ -214,14 +212,14 @@ namespace System.Net.Http.Functional.Tests
         // We have tests that validate with SslStream, but that's limited by what the current OS supports.
         // This tests provides additional validation against an external server.
         [OuterLoop("Avoid www.ssllabs.com dependency in innerloop.")]
-        [Theory]
+        [ConditionalTheory(nameof(IsWindows10Version1607OrGreater))]
         [MemberData(nameof(NotSupportedSSLVersionServers))]
         public async Task GetAsync_UnsupportedSSLVersion_Throws(SslProtocols sslProtocols, string url)
         {
-            using (HttpClientHandler handler = CreateHttpClientHandler())
+            using (StandardSocketsHttpHandler handler = CreateSocketsHttpHandler())
             using (HttpClient client = new HttpClient(handler))
             {
-                handler.SslProtocols = sslProtocols;
+                handler.SslOptions.EnabledSslProtocols = sslProtocols;
                 await Assert.ThrowsAsync<HttpRequestException>(() => RemoteServerQuery.Run(() => client.GetAsync(url), remoteServerExceptionWrapper, url));
             }
         }
@@ -235,10 +233,10 @@ namespace System.Net.Http.Functional.Tests
                 return;
             }
 
-            using (HttpClientHandler handler = CreateHttpClientHandler())
+            using (StandardSocketsHttpHandler handler = CreateSocketsHttpHandler())
             using (var client = new HttpClient(handler))
             {
-                handler.ServerCertificateCustomValidationCallback = TestHelper.AllowAllCertificates;
+                handler.SslOptions.RemoteCertificateValidationCallback = SecurityHelper.AllowAllCertificates;
 
                 var options = new LoopbackServer.Options { UseSsl = true, SslProtocols = SslProtocols.Tls12 };
                 await LoopbackServer.CreateServerAsync(async (server, url) =>
@@ -268,11 +266,11 @@ namespace System.Net.Http.Functional.Tests
         {
             if (!BackendSupportsSslConfiguration)
                 return;
-            using (HttpClientHandler handler = CreateHttpClientHandler())
+            using (StandardSocketsHttpHandler handler = CreateSocketsHttpHandler())
             using (var client = new HttpClient(handler))
             {
-                handler.SslProtocols = allowedProtocol;
-                handler.ServerCertificateCustomValidationCallback = TestHelper.AllowAllCertificates;
+                handler.SslOptions.EnabledSslProtocols = allowedProtocol;
+                handler.SslOptions.RemoteCertificateValidationCallback = SecurityHelper.AllowAllCertificates;
 
                 var options = new LoopbackServer.Options { UseSsl = true, SslProtocols = acceptedProtocol };
                 await LoopbackServer.CreateServerAsync(async (server, url) =>
@@ -300,11 +298,11 @@ namespace System.Net.Http.Functional.Tests
         [Fact]
         public async Task GetAsync_DisallowTls10_AllowTls11_AllowTls12()
         {
-            using (HttpClientHandler handler = CreateHttpClientHandler())
+            using (StandardSocketsHttpHandler handler = CreateSocketsHttpHandler())
             using (var client = new HttpClient(handler))
             {
-                handler.SslProtocols = SslProtocols.Tls11 | SslProtocols.Tls12;
-                handler.ServerCertificateCustomValidationCallback = TestHelper.AllowAllCertificates;
+                handler.SslOptions.EnabledSslProtocols = SslProtocols.Tls11 | SslProtocols.Tls12;
+                handler.SslOptions.RemoteCertificateValidationCallback = SecurityHelper.AllowAllCertificates;
 
                 if (BackendSupportsSslConfiguration)
                 {

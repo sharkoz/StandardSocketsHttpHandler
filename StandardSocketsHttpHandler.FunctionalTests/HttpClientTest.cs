@@ -108,7 +108,6 @@ namespace System.Net.Http.Functional.Tests
             }
         }
 
-        [SkipOnTargetFramework(TargetFrameworkMonikers.NetFramework, "no exception throw on netfx")]
         [Theory]
         [InlineData(1, 2, true)]
         [InlineData(1, 127, true)]
@@ -212,7 +211,11 @@ namespace System.Net.Http.Functional.Tests
             using (var client = new HttpClient(new CustomResponseHandler((r,c) => Task.FromResult(new HttpResponseMessage() { Content = null }))))
             {
                 Assert.Same(string.Empty, await client.GetStringAsync(CreateFakeUri()));
+#if NETFRAMEWORK
+                Assert.Equal(Array.Empty<byte>(), await client.GetByteArrayAsync(CreateFakeUri()));
+#else
                 Assert.Same(Array.Empty<byte>(), await client.GetByteArrayAsync(CreateFakeUri()));
+#endif
                 Assert.Same(Stream.Null, await client.GetStreamAsync(CreateFakeUri()));
             }
         }
@@ -341,6 +344,8 @@ namespace System.Net.Http.Functional.Tests
             }
         }
 
+        // https://github.com/dotnet/runtime/issues/25789
+        [SkipOnTargetFramework(TargetFrameworkMonikers.NetFramework, ".NET Framework disposes request content after send")]
         [Fact]
         public async Task SendAsync_RequestContentNotDisposed()
         {

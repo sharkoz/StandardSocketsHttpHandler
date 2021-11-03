@@ -49,7 +49,10 @@ namespace System.Net.Http
             string algorithm;
             if (digestResponse.Parameters.TryGetValue(Algorithm, out algorithm))
             {
-                if (algorithm != Sha256 && algorithm != Md5 && algorithm != Sha256Sess && algorithm != MD5Sess)
+                if (!algorithm.Equals(Sha256, StringComparison.OrdinalIgnoreCase) &&
+                    !algorithm.Equals(Md5, StringComparison.OrdinalIgnoreCase) &&
+                    !algorithm.Equals(Sha256Sess, StringComparison.OrdinalIgnoreCase) &&
+                    !algorithm.Equals(MD5Sess, StringComparison.OrdinalIgnoreCase))
                 {
                     if (NetEventSource.IsEnabled) NetEventSource.Error(digestResponse, "Algorithm not supported: {algorithm}");
                     return null;
@@ -138,7 +141,7 @@ namespace System.Net.Http
 
             // Calculate response
             string a1 = credential.UserName + ":" + realm + ":" + credential.Password;
-            if (algorithm.IndexOf("sess") != -1)
+            if (algorithm.EndsWith("sess", StringComparison.OrdinalIgnoreCase))
             {
                 a1 = ComputeHash(a1, algorithm) + ":" + nonce + ":" + cnonce;
             }
@@ -190,8 +193,8 @@ namespace System.Net.Http
         private static string GetRandomAlphaNumericString()
         {
             const int Length = 16;
-            Span<byte> randomNumbers = stackalloc byte[Length * 2];
-            RandomNumberGenerator.Fill(randomNumbers);
+            byte[] randomNumbers = new byte[Length * 2];
+            RandomNumberGenerator.Create().GetBytes(randomNumbers);
 
             StringBuilder sb = StringBuilderCache.Acquire(Length);
             for (int i = 0; i < randomNumbers.Length;)
@@ -209,21 +212,17 @@ namespace System.Net.Http
         {
             // Disable MD5 insecure warning.
 #pragma warning disable CA5351
-            using (HashAlgorithm hash = algorithm.Contains(Sha256) ? SHA256.Create() : (HashAlgorithm)MD5.Create())
+            using (HashAlgorithm hash = algorithm.StartsWith(Sha256, StringComparison.OrdinalIgnoreCase) ? SHA256.Create() : (HashAlgorithm)MD5.Create())
 #pragma warning restore CA5351
             {
                 Span<byte> result = stackalloc byte[hash.HashSize / 8]; // HashSize is in bits
-                bool hashComputed = hash.TryComputeHash(Encoding.UTF8.GetBytes(data), result, out int bytesWritten);
-                Debug.Assert(hashComputed && bytesWritten == result.Length);
+                result = hash.ComputeHash(Encoding.UTF8.GetBytes(data));
 
                 StringBuilder sb = StringBuilderCache.Acquire(result.Length * 2);
 
-                Span<char> byteX2 = stackalloc char[2];
                 for (int i = 0; i < result.Length; i++)
                 {
-                    bool formatted = result[i].TryFormat(byteX2, out int charsWritten, "x2");
-                    Debug.Assert(formatted && charsWritten == 2);
-                    sb.Append(byteX2);
+                    sb.Append(result[i].ToString("x2"));
                 }
 
                 return StringBuilderCache.GetStringAndRelease(sb);

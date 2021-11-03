@@ -14,6 +14,7 @@ namespace System.Net.Http
         private sealed class HttpConnectionResponseContent : HttpContent
         {
             private HttpContentStream _stream;
+            private CancellationToken _cancellationToken;
             private bool _consumedStream;
 
             public void SetStream(HttpContentStream stream)
@@ -23,6 +24,13 @@ namespace System.Net.Http
                 Debug.Assert(!_consumedStream);
 
                 _stream = stream;
+            }
+
+            public void SetDefaultCancellationToken(CancellationToken cancellationToken)
+            {
+                Debug.Assert(cancellationToken != null);
+
+                _cancellationToken = cancellationToken;
             }
 
             internal bool IsEmpty => (_stream == EmptyReadStream.Instance);
@@ -39,9 +47,9 @@ namespace System.Net.Http
             }
 
             protected sealed override Task SerializeToStreamAsync(Stream stream, TransportContext context) =>
-                SerializeToStreamAsync(stream, context, CancellationToken.None);
+                SerializeToStreamAsyncInternal(stream, context, _cancellationToken);
 
-            internal sealed override async Task SerializeToStreamAsync(Stream stream, TransportContext context, CancellationToken cancellationToken)
+            internal async Task SerializeToStreamAsyncInternal(Stream stream, TransportContext context, CancellationToken cancellationToken)
             {
                 Debug.Assert(stream != null);
 
@@ -52,7 +60,7 @@ namespace System.Net.Http
                 }
             }
 
-            protected internal sealed override bool TryComputeLength(out long length)
+            protected sealed override bool TryComputeLength(out long length)
             {
                 length = 0;
                 return false;
@@ -60,9 +68,6 @@ namespace System.Net.Http
 
             protected sealed override Task<Stream> CreateContentReadStreamAsync() =>
                 Task.FromResult<Stream>(ConsumeStream());
-
-            internal sealed override Stream TryCreateContentReadStream() =>
-                ConsumeStream();
 
             protected sealed override void Dispose(bool disposing)
             {
